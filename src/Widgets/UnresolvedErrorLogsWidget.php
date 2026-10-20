@@ -89,6 +89,7 @@ class UnresolvedErrorLogsWidget extends TableWidget
 			->recordActions([
 				ViewAction::make()
 					->iconButton()
+					->modalHeading(fn(ErrorLog $record): string => ErrorLogResource::modalHeading($record))
 					->schema(fn(Schema $schema): Schema => ErrorLogResource::infolist($schema))
 					->extraModalFooterActions([ErrorLogResource::copyReportAction()]),
 				Action::make('resolve')

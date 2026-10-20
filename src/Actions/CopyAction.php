@@ -67,6 +67,7 @@ class CopyAction extends Action
 
 		$value = $component->formatState($state);
 
-		return $value instanceof Htmlable ? strip_tags($value->toHtml()) : (string) $value;
+		// из HTML — обычный текст: без тегов и с раскодированными &gt; &amp; и т. п.
+		return $value instanceof Htmlable ? html_entity_decode(strip_tags($value->toHtml()), ENT_QUOTES | ENT_HTML5) : (string) $value;
 	}
 }

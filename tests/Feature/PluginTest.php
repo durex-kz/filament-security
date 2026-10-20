@@ -129,3 +129,68 @@ it('lets every error log column be hidden and wraps long messages in the card', 
 		->mountAction(TestAction::make('view')->table($log))
 		->assertMountedActionModalSeeHtml('overflow-wrap: anywhere');
 });
+
+it('shows every stored field of the error in the card', function () {
+	config()->set('app.locale', 'ru');
+	$this->actingAs($admin = $this->admin());
+
+	$values = [
+		'user_id' => $admin->id,
+		'code' => 500,
+		'exception' => 'Illuminate\View\ViewException',
+		'root_exception' => 'Illuminate\Database\QueryException',
+		'message' => 'Column not found: offers.price_total',
+		'file' => '/srv/site/vendor/laravel/framework/src/Foo.php',
+		'line' => 1234,
+		'trace' => '#0 /srv/site/app/Models/Offer.php(42): Foo->bar()',
+		'method' => 'POST',
+		'url' => 'https://orange.kz/admin/offers/7/edit',
+		'post_data' => '{"price_total": "100"}',
+		'ip' => '203.0.113.77',
+		'user_agent' => 'Mozilla/5.0 TestBrowser/9.9',
+		'fingerprint' => sha1('fingerprint-x'),
+		'app_file' => 'app/Models/Offer.php',
+		'app_line' => 42,
+		'route_name' => 'filament.admin.resources.offers.edit',
+		'livewire_component' => 'app.filament.resources.offers.pages.edit-offer',
+		'livewire_path' => '/admin/offers/7/edit',
+		'livewire_calls' => 'save(); set data.price_total',
+		'referer' => 'https://orange.kz/admin/offers',
+		'resolution' => 'Добавлена колонка price_total',
+		'resolved_at' => now(),
+		'resolved_by' => $admin->id,
+	];
+
+	$log = ErrorLog::create($values);
+	ErrorLog::create(['code' => 500, 'fingerprint' => $values['fingerprint'], 'url' => 'https://orange.kz/repeat-url']);
+
+	$expected = [
+		'#' . $log->id, 'Исправлено', 'Повторов всего', 'Обновлено',
+		$values['exception'], $values['root_exception'], $values['message'], $values['file'] . ':1234',
+		'app/Models/Offer.php:42', $values['route_name'], $values['fingerprint'],
+		$values['method'], $values['url'], $values['referer'], $values['ip'], $values['user_agent'], 'Admin',
+		$values['livewire_component'], $values['livewire_path'], $values['livewire_calls'],
+		'price_total', 'Foo-&gt;bar()', $values['resolution'], 'Дата исправления', 'Исправил',
+		'repeat-url',
+	];
+
+	Livewire::test(ManageErrorLogs::class)
+		->removeTableFilters() // по умолчанию в таблице только неисправленные
+		->mountAction(TestAction::make('view')->table($log))
+		->assertMountedActionModalSeeHtml(array_map(fn($v) => str_contains($v, '&gt;') ? $v : e($v), $expected));
+});
+
+it('labels guests and deleted users in the card', function () {
+	app()->setLocale('ru');
+
+	expect(ErrorLogResource::userLabel(null, 0, 'гость'))->toBe('гость')
+		->and(ErrorLogResource::userLabel(null, 15, 'гость'))->toBe('#15 (удалён)');
+});
+
+it('copies multiline fields as plain text', function () {
+	$trace = "#0 /srv/app/A.php(1): A->b('x & y')\n#1 {main}";
+	$html = new \Illuminate\Support\HtmlString(nl2br(e($trace), false)); // как ErrorLogResource::multiline()
+
+	// так CopyAction превращает показанное значение в текст для буфера обмена
+	expect(html_entity_decode(strip_tags($html->toHtml()), ENT_QUOTES | ENT_HTML5))->toBe($trace);
+});

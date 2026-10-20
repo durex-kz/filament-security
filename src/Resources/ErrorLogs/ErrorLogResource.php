@@ -20,6 +20,8 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Icons\Heroicon;
@@ -31,6 +33,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\HtmlString;
 use UnitEnum;
 
 class ErrorLogResource extends Resource
@@ -101,212 +104,375 @@ class ErrorLogResource extends Resource
 		};
 	}
 
+	/*
+		карточка ошибки: сводка (код, статус, сообщение, место в коде) и решение всегда на виду,
+		подробности — по вкладкам. Пустые поля не выводятся
+	*/
 	public static function infolist(Schema $schema): Schema
 	{
 		return $schema
 			->columns(1)
 			->components([
-				Section::make(__('Ошибка'))
-					->collapsible()
-					->columns(3)
-					->schema([
-						TextEntry::make('code')
-							->suffixAction(CopyAction::make())
-							->badge()
-							->color(fn(?int $state): string => static::codeColor($state))
-							->label(__('Код')),
-						TextEntry::make('created_at')
-							->suffixAction(CopyAction::make())
-							->dateTime()
-							->label(__('Дата')),
-						TextEntry::make('exception')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Исключение')),
-						TextEntry::make('root_exception')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Исходное исключение')),
-						TextEntry::make('repeats_total')
-							->state(fn(ErrorLog $record): int => $record->repeats()->count() + 1)
-							->badge()
-							->color(fn(int $state): string => $state > 1 ? 'warning' : 'gray')
-							->label(__('Повторов всего')),
-						TextEntry::make('repeats_unresolved')
-							->state(fn(ErrorLog $record): int => $record->repeats()->unresolved()->count())
-							->badge()
-							->color(fn(int $state): string => $state > 0 ? 'danger' : 'gray')
-							->label(__('Других неисправленных')),
-						TextEntry::make('message')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->weight(FontWeight::Bold)
-							// длинные SQL, пути и адреса без пробелов переносятся, а не вылезают за край окна
-							->extraAttributes(['style' => 'white-space: pre-wrap; overflow-wrap: anywhere'])
-							->columnSpanFull()
-							->label(__('Сообщение')),
-						TextEntry::make('file')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->formatStateUsing(fn(ErrorLog $record): string => $record->file . ':' . $record->line)
-							->columnSpanFull()
-							->label(__('Файл')),
-						// первое место в app/, resources/, routes/, database/ — у ошибок в шаблонах и SQL «Файл» указывает во vendor
-						TextEntry::make('app_file')
-							->suffixAction(CopyAction::make())
-							->formatStateUsing(fn(ErrorLog $record): ?string => $record->appLocation())
-							->placeholder('—')
-							->weight(FontWeight::Bold)
-							->columnSpanFull()
-							->label(__('Место в коде')),
-					]),
+				static::summarySection(),
+				static::resolutionSection(),
 
-				// описание решения — сразу под ошибкой, не свёрнуто; кнопка в заголовке — дописать/исправить текст
-				Section::make(__('Решение'))
-					->collapsible()
-					->headerActions([
-						Action::make('editResolution')
-							->icon(Heroicon::OutlinedPencilSquare)
-							->color('gray')
-							->authorize('resolve')
-							->schema([static::resolutionField()])
-							->fillForm(fn(ErrorLog $record): array => ['resolution' => $record->resolution])
-							->action(fn(ErrorLog $record, array $data) => $record->update(['resolution' => $data['resolution'] ?: null]))
-							->label(__('Изменить')),
-					])
-					->schema([
-						TextEntry::make('resolution')
-							->hiddenLabel()
-							->suffixAction(CopyAction::make())
-							->placeholder(__('Решение ещё не описано'))
-							->extraAttributes(['style' => 'white-space: pre-wrap']),
-					]),
-
-				Section::make(__('Запрос'))
-					->collapsible()
-					->collapsed()
-					->columns(3)
-					->schema([
-						TextEntry::make('is_scanner')
-							->formatStateUsing(fn(bool $state): string => $state ? __('Да') : __('Нет'))
-							->badge()
-							->color(fn(bool $state): string => $state ? 'warning' : 'gray')
-							->label(__('Сканер')),
-						TextEntry::make('method')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Метод')),
-						TextEntry::make('user.name')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Пользователь')),
-						// поля проекта о пользователе (например, организация): SecurityPlugin::errorLogUserEntries()
-						...SecurityPlugin::current()->getErrorLogUserEntries(),
-						TextEntry::make('url')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->columnSpanFull()
-							->label(__('Адрес')),
-						TextEntry::make('referer')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->columnSpanFull()
-							->label(__('Откуда (Referer)')),
-						TextEntry::make('route_name')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Маршрут')),
-						TextEntry::make('livewire_component')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->columnSpan(2)
-							->label(__('Livewire-компонент')),
-						TextEntry::make('livewire_path')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Страница компонента')),
-						TextEntry::make('livewire_calls')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->fontFamily('mono')
-							->extraAttributes(['style' => 'white-space: pre-wrap; font-size: 12px'])
-							->columnSpan(2)
-							->label(__('Вызовы Livewire')),
-						TextEntry::make('ip')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('IP-адрес')),
-						TextEntry::make('user_agent')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->columnSpan(2)
-							->label(__('User-Agent')),
-						TextEntry::make('post_data')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->fontFamily('mono')
-							->extraAttributes(['style' => 'white-space: pre-wrap; font-size: 12px'])
-							->columnSpanFull()
-							->label(__('POST-данные')),
-					]),
-
-				Section::make(__('Исправление'))
-					->collapsible()
-					->collapsed()
-					->columns(2)
-					->schema([
-						TextEntry::make('resolved_at')
-							->suffixAction(CopyAction::make())
-							->dateTime()
-							->placeholder('—')
-							->label(__('Дата исправления')),
-						TextEntry::make('resolver.name')
-							->suffixAction(CopyAction::make())
-							->placeholder('—')
-							->label(__('Исправил')),
-					]),
-
-				// последние записи той же ошибки: когда, у кого и на каком адресе повторялась
-				Section::make(__('Повторы'))
-					->collapsible()
-					->collapsed()
-					->visible(fn(ErrorLog $record): bool => $record->repeats()->exists())
-					->schema([
-						TextEntry::make('repeats_list')
-							->hiddenLabel()
-							->state(fn(ErrorLog $record): string => $record->repeats()
-								->with('user')
-								->latest('id')
-								->limit(30)
-								->get()
-								->map(fn(ErrorLog $repeat): string => implode(' · ', [
-									'#' . $repeat->id,
-									$repeat->created_at?->format('d.m.Y H:i:s'),
-									$repeat->isResolved() ? __('исправлено') : __('не исправлено'),
-									$repeat->user?->name ?? __('гость'),
-									$repeat->url ?? '—',
-								]))
-								->implode("\n"))
-							->fontFamily('mono')
-							->extraAttributes(['style' => 'white-space: pre-wrap; font-size: 12px']),
-					]),
-
-				Section::make(__('Стек вызовов'))
-					->collapsible()
-					->collapsed()
-					// кнопка в заголовке, чтобы копировать стек не разворачивая секцию
-					->headerActions([
-						CopyAction::make('copyTrace')
-							->copyText(fn(ErrorLog $record): ?string => $record->trace),
-					])
-					->schema([
-						TextEntry::make('trace')
-							->hiddenLabel()
-							->placeholder('—')
-							->fontFamily('mono')
-							->extraAttributes(['style' => 'white-space: pre-wrap; font-size: 12px']),
+				Tabs::make('details')
+					->contained(false)
+					->tabs([
+						static::codeTab(),
+						static::requestTab(),
+						static::livewireTab(),
+						static::postDataTab(),
+						static::traceTab(),
+						static::repeatsTab(),
 					]),
 			]);
+	}
+
+	/*
+		сводка: значки состояния, сообщение и место в коде
+	*/
+	protected static function summarySection(): Section
+	{
+		return Section::make()
+			->compact()
+			->columns(['default' => 2, 'md' => 4])
+			->schema([
+				TextEntry::make('code')
+					->badge()
+					->icon(Heroicon::OutlinedExclamationTriangle)
+					->color(fn(?int $state): string => static::codeColor($state))
+					->tooltip(fn(ErrorLog $record): string => ErrorLog::codeDescription((int) $record->code))
+					->label(__('Код')),
+
+				TextEntry::make('status')
+					->state(fn(ErrorLog $record): string => $record->isResolved() ? __('Исправлено') : __('Не исправлено'))
+					->badge()
+					->icon(fn(ErrorLog $record): Heroicon => $record->isResolved() ? Heroicon::OutlinedCheckCircle : Heroicon::OutlinedXCircle)
+					->color(fn(ErrorLog $record): string => $record->isResolved() ? 'success' : 'danger')
+					->label(__('Статус')),
+
+				TextEntry::make('is_scanner')
+					->formatStateUsing(fn(bool $state): string => $state ? __('Сканер') : __('Нет'))
+					->badge()
+					->icon(fn(bool $state): Heroicon => $state ? Heroicon::OutlinedBugAnt : Heroicon::OutlinedUser)
+					->color(fn(bool $state): string => $state ? 'warning' : 'gray')
+					->tooltip(__('Запрос сканера уязвимостей: записан сразу исправленным'))
+					->label(__('Сканер')),
+
+				TextEntry::make('repeats_total')
+					->state(fn(ErrorLog $record): int => $record->repeats()->count() + 1)
+					->formatStateUsing(fn(int $state): string => '×' . $state)
+					->badge()
+					->icon(Heroicon::OutlinedArrowPath)
+					->color(fn(int $state): string => $state > 1 ? 'warning' : 'gray')
+					->tooltip(fn(ErrorLog $record): string => __('Других неисправленных') . ': ' . $record->repeats()->unresolved()->count())
+					->label(__('Повторов всего')),
+
+				TextEntry::make('created_at')
+					->dateTime()
+					->sinceTooltip()
+					->icon(Heroicon::OutlinedCalendar)
+					->suffixAction(CopyAction::make())
+					->columnSpan(['default' => 2, 'md' => 2])
+					->label(__('Дата')),
+
+				TextEntry::make('id')
+					->formatStateUsing(fn(int $state): string => '#' . $state)
+					->icon(Heroicon::OutlinedHashtag)
+					->suffixAction(CopyAction::make())
+					->label('ID'),
+
+				TextEntry::make('updated_at')
+					->dateTime()
+					->sinceTooltip()
+					->icon(Heroicon::OutlinedClock)
+					->label(__('Обновлено')),
+
+				TextEntry::make('message')
+					->formatStateUsing(static::multiline())
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->weight(FontWeight::Bold)
+					// длинные SQL, пути и адреса без пробелов переносятся, а не вылезают за край окна
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->columnSpanFull()
+					->label(__('Сообщение')),
+
+				// первое место в app/, resources/, routes/, database/ — у ошибок в шаблонах и SQL «Файл» указывает во vendor
+				TextEntry::make('app_file')
+					->formatStateUsing(fn(ErrorLog $record): ?string => $record->appLocation())
+					->icon(Heroicon::OutlinedCodeBracket)
+					->iconColor('primary')
+					->fontFamily('mono')
+					->weight(FontWeight::Bold)
+					->suffixAction(CopyAction::make())
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->visible(fn(ErrorLog $record): bool => filled($record->app_file))
+					->columnSpanFull()
+					->label(__('Место в коде')),
+			]);
+	}
+
+	/*
+		решение: причина и что сделано, кто и когда исправил; кнопка в заголовке — дописать/исправить текст
+	*/
+	protected static function resolutionSection(): Section
+	{
+		return Section::make(__('Решение'))
+			->icon(Heroicon::OutlinedWrench)
+			->iconColor(fn(ErrorLog $record): string => $record->isResolved() ? 'success' : 'gray')
+			->compact()
+			->collapsible()
+			->columns(['default' => 1, 'md' => 2])
+			->headerActions([
+				Action::make('editResolution')
+					->icon(Heroicon::OutlinedPencilSquare)
+					->color('gray')
+					->authorize('resolve')
+					->schema([static::resolutionField()])
+					->fillForm(fn(ErrorLog $record): array => ['resolution' => $record->resolution])
+					->action(fn(ErrorLog $record, array $data) => $record->update(['resolution' => $data['resolution'] ?: null]))
+					->label(__('Изменить')),
+			])
+			->schema([
+				TextEntry::make('resolution')
+					->formatStateUsing(static::multiline())
+					->hiddenLabel()
+					->suffixAction(CopyAction::make())
+					->placeholder(__('Решение ещё не описано'))
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->columnSpanFull(),
+				TextEntry::make('resolved_at')
+					->dateTime()
+					->sinceTooltip()
+					->icon(Heroicon::OutlinedCheckCircle)
+					->iconColor('success')
+					->visible(fn(ErrorLog $record): bool => $record->isResolved())
+					->label(__('Дата исправления')),
+				TextEntry::make('resolver_name')
+					->state(fn(ErrorLog $record): string => static::userLabel($record->resolver, (int) $record->resolved_by, __('система')))
+					->icon(Heroicon::OutlinedUser)
+					->visible(fn(ErrorLog $record): bool => $record->isResolved())
+					->label(__('Исправил')),
+			]);
+	}
+
+	protected static function codeTab(): Tab
+	{
+		return Tab::make(__('Код'))
+			->icon(Heroicon::OutlinedCodeBracket)
+			->columns(['default' => 1, 'md' => 2])
+			->schema([
+				TextEntry::make('exception')
+					->icon(Heroicon::OutlinedExclamationTriangle)
+					->iconColor('danger')
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->label(__('Исключение')),
+				TextEntry::make('root_exception')
+					->icon(Heroicon::OutlinedArrowsRightLeft)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->visible(fn(ErrorLog $record): bool => filled($record->root_exception))
+					->label(__('Исходное исключение')),
+				TextEntry::make('file')
+					->formatStateUsing(fn(ErrorLog $record): string => $record->file . ($record->line ? ':' . $record->line : ''))
+					->icon(Heroicon::OutlinedDocumentText)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->columnSpanFull()
+					->label(__('Файл')),
+				TextEntry::make('route_name')
+					->icon(Heroicon::OutlinedSignal)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->visible(fn(ErrorLog $record): bool => filled($record->route_name))
+					->label(__('Маршрут')),
+				TextEntry::make('fingerprint')
+					->icon(Heroicon::OutlinedFingerPrint)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->helperText(__('Одинаковый отпечаток — одна и та же ошибка: по нему группируются повторы'))
+					->label(__('Отпечаток')),
+			]);
+	}
+
+	protected static function requestTab(): Tab
+	{
+		return Tab::make(__('Запрос'))
+			->icon(Heroicon::OutlinedGlobeAlt)
+			->columns(['default' => 1, 'md' => 3])
+			->schema([
+				TextEntry::make('method')
+					->badge()
+					->color('gray')
+					->placeholder('—')
+					->label(__('Метод')),
+				TextEntry::make('url')
+					->icon(Heroicon::OutlinedLink)
+					->suffixAction(CopyAction::make())
+					->placeholder(__('вне HTTP-запроса (очередь, artisan, планировщик)'))
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->columnSpan(['default' => 1, 'md' => 2])
+					->label(__('Адрес')),
+				TextEntry::make('referer')
+					->icon(Heroicon::OutlinedArrowTopRightOnSquare)
+					->suffixAction(CopyAction::make())
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->visible(fn(ErrorLog $record): bool => filled($record->referer))
+					->columnSpanFull()
+					->label(__('Откуда (Referer)')),
+				TextEntry::make('user_label')
+					->state(fn(ErrorLog $record): string => static::userLabel($record->user, (int) $record->user_id, __('гость')))
+					->icon(Heroicon::OutlinedUser)
+					->suffixAction(CopyAction::make())
+					->label(__('Пользователь')),
+				// поля проекта о пользователе (например, организация): SecurityPlugin::errorLogUserEntries()
+				...SecurityPlugin::current()->getErrorLogUserEntries(),
+				TextEntry::make('ip')
+					->icon(Heroicon::OutlinedMapPin)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->label(__('IP-адрес')),
+				TextEntry::make('user_agent')
+					->icon(Heroicon::OutlinedComputerDesktop)
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->columnSpanFull()
+					->label(__('User-Agent')),
+			]);
+	}
+
+	protected static function livewireTab(): Tab
+	{
+		return Tab::make('Livewire')
+			->icon(Heroicon::OutlinedBolt)
+			->visible(fn(?ErrorLog $record): bool => filled($record?->livewire_component) || filled($record?->livewire_calls))
+			->columns(['default' => 1, 'md' => 2])
+			->schema([
+				TextEntry::make('livewire_component')
+					->icon(Heroicon::OutlinedSquare3Stack3d)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->label(__('Livewire-компонент')),
+				TextEntry::make('livewire_path')
+					->icon(Heroicon::OutlinedLink)
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere'])
+					->label(__('Страница компонента')),
+				TextEntry::make('livewire_calls')
+					->formatStateUsing(static::multiline())
+					->icon(Heroicon::OutlinedCursorArrowRays)
+					->fontFamily('mono')
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere; font-size: 12px'])
+					->columnSpanFull()
+					->label(__('Вызовы Livewire')),
+			]);
+	}
+
+	protected static function postDataTab(): Tab
+	{
+		return Tab::make(__('POST-данные'))
+			->icon(Heroicon::OutlinedDocumentText)
+			->visible(fn(?ErrorLog $record): bool => filled($record?->post_data))
+			->schema([
+				TextEntry::make('post_data')
+					->formatStateUsing(static::multiline())
+					->hiddenLabel()
+					->suffixAction(CopyAction::make())
+					->fontFamily('mono')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere; font-size: 12px']),
+			]);
+	}
+
+	protected static function traceTab(): Tab
+	{
+		return Tab::make(__('Стек вызовов'))
+			->icon(Heroicon::OutlinedQueueList)
+			->schema([
+				TextEntry::make('trace')
+					->formatStateUsing(static::multiline())
+					->hiddenLabel()
+					->suffixAction(CopyAction::make())
+					->placeholder('—')
+					->fontFamily('mono')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere; font-size: 12px']),
+			]);
+	}
+
+	/*
+		последние записи той же ошибки: когда, у кого и на каком адресе повторялась
+	*/
+	protected static function repeatsTab(): Tab
+	{
+		return Tab::make(__('Повторы'))
+			->icon(Heroicon::OutlinedArrowPath)
+			->badge(fn(?ErrorLog $record): ?int => $record ? ($record->repeats()->count() ?: null) : null)
+			->visible(fn(?ErrorLog $record): bool => (bool) $record?->repeats()->exists())
+			->schema([
+				TextEntry::make('repeats_list')
+					->formatStateUsing(static::multiline())
+					->hiddenLabel()
+					->state(fn(ErrorLog $record): string => $record->repeats()
+						->with('user')
+						->latest('id')
+						->limit(30)
+						->get()
+						->map(fn(ErrorLog $repeat): string => implode(' · ', [
+							'#' . $repeat->id,
+							$repeat->created_at?->format('d.m.Y H:i:s'),
+							$repeat->isResolved() ? __('исправлено') : __('не исправлено'),
+							static::userLabel($repeat->user, (int) $repeat->user_id, __('гость')),
+							$repeat->url ?? '—',
+						]))
+						->implode("\n"))
+					->fontFamily('mono')
+					->extraAttributes(['style' => 'overflow-wrap: anywhere; font-size: 12px']),
+			]);
+	}
+
+	/*
+		многострочный текст (стек, POST-данные, решение): строки — через <br>, HTML экранируется.
+		white-space: pre-wrap не подходит — он сохраняет отступы шаблона Filament и даёт пустые области
+	*/
+	protected static function multiline(): \Closure
+	{
+		return fn(?string $state): ?HtmlString => filled($state) ? new HtmlString(nl2br(e($state), false)) : null;
+	}
+
+	/*
+		пользователь записи: имя; удалённый — по id; 0 — гость (или система для «Исправил»)
+	*/
+	public static function userLabel($user, int $id, string $nobody): string
+	{
+		return match (true) {
+			$user !== null => (string) ($user->name ?? ('#' . $id)),
+			$id > 0 => '#' . $id . ' (' . __('удалён') . ')',
+			default => $nobody,
+		};
+	}
+
+	/*
+		заголовок окна просмотра: «Ошибка #3 · 500»
+	*/
+	public static function modalHeading(ErrorLog $record): string
+	{
+		return __('Ошибка') . ' #' . $record->getKey() . ' · ' . $record->code;
 	}
 
 	/*
@@ -522,6 +688,7 @@ class ErrorLogResource extends Resource
 			])
 			->recordActions([
 				ViewAction::make()
+					->modalHeading(fn(ErrorLog $record): string => static::modalHeading($record))
 					->extraModalFooterActions([static::copyReportAction()]),
 				Action::make('resolve')
 					->icon(Heroicon::OutlinedCheckCircle)
