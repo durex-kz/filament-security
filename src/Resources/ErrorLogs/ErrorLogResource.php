@@ -141,6 +141,8 @@ class ErrorLogResource extends Resource
 							->suffixAction(CopyAction::make())
 							->placeholder('—')
 							->weight(FontWeight::Bold)
+							// длинные SQL, пути и адреса без пробелов переносятся, а не вылезают за край окна
+							->extraAttributes(['style' => 'white-space: pre-wrap; overflow-wrap: anywhere'])
 							->columnSpanFull()
 							->label(__('Сообщение')),
 						TextEntry::make('file')
@@ -382,12 +384,14 @@ class ErrorLogResource extends Resource
 					->color(fn(?int $state): string => static::codeColor($state))
 					->sortable()
 					->searchable()
+					->toggleable()
 					->label(__('Код')),
 
 				IconColumn::make('resolved_at')
 					->state(fn(ErrorLog $record): bool => $record->isResolved())
 					->boolean()
 					->sortable()
+					->toggleable()
 					->label(__('Исправлено')),
 
 				IconColumn::make('is_scanner')
@@ -408,12 +412,14 @@ class ErrorLogResource extends Resource
 					->color('warning')
 					->placeholder('')
 					->sortable(query: fn(Builder $query, string $direction): Builder => $query->orderBy('repeats_count', $direction))
+					->toggleable()
 					->label(__('Повторы')),
 
 				TextColumn::make('created_at')
 					->dateTime()
 					->sortable()
 					->wrap()
+					->toggleable()
 					->label(__('Дата')),
 
 				TextColumn::make('message')
@@ -421,12 +427,14 @@ class ErrorLogResource extends Resource
 					->limit(80)
 					->wrap()
 					->placeholder('—')
+					->toggleable()
 					->label(__('Сообщение')),
 
 				TextColumn::make('url')
 					->searchable()
 					->limit(60)
 					->placeholder('—')
+					->toggleable()
 					->label(__('Адрес')),
 
 				TextColumn::make('app_file')

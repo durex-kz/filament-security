@@ -112,3 +112,20 @@ it('opens the error card with project user entries and copy buttons', function (
 			'Копировать всё',
 		]);
 });
+
+it('lets every error log column be hidden and wraps long messages in the card', function () {
+	config()->set('app.locale', 'ru');
+	$this->actingAs($this->admin());
+
+	$log = ErrorLog::create(['code' => 500, 'message' => 'SQLSTATE[42S22]:' . str_repeat('x', 300), 'fingerprint' => sha1('a')]);
+
+	$table = Livewire::test(ManageErrorLogs::class)->instance()->getTable();
+
+	foreach ($table->getColumns() as $column) {
+		expect($column->isToggleable())->toBeTrue("колонку {$column->getName()} нельзя скрыть");
+	}
+
+	Livewire::test(ManageErrorLogs::class)
+		->mountAction(TestAction::make('view')->table($log))
+		->assertMountedActionModalSeeHtml('overflow-wrap: anywhere');
+});

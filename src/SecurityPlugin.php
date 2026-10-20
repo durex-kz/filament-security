@@ -219,7 +219,16 @@ class SecurityPlugin implements Plugin
 
 	public function getErrorLogUserColumns(): array
 	{
-		return $this->errorLogUserColumns ? (array) $this->evaluate($this->errorLogUserColumns) : [];
+		$columns = $this->errorLogUserColumns ? (array) $this->evaluate($this->errorLogUserColumns) : [];
+
+		// все колонки журнала можно скрыть; если проект сам задал toggleable(...), его настройка сохраняется
+		foreach ($columns as $column) {
+			if ($column instanceof \Filament\Tables\Columns\Column && !$column->isToggleable()) {
+				$column->toggleable();
+			}
+		}
+
+		return $columns;
 	}
 
 	/**
