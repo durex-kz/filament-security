@@ -1,6 +1,8 @@
 # durex-kz/filament-security
 
-Плагин Filament 5. Добавляет в панель «Журнал ошибок» ([`durex-kz/error-monitor`](https://github.com/durex-kz/error-monitor)), «Заблокированные IP» ([`durex-kz/bot-guard`](https://github.com/durex-kz/bot-guard)) и два виджета для главной страницы.
+Плагин Filament 5. Добавляет в панель «Журнал ошибок» ([`durex-kz/error-monitor`](https://github.com/durex-kz/error-monitor)), «Заблокированные IP» и «Белый список IP» ([`durex-kz/bot-guard`](https://github.com/durex-kz/bot-guard)) и два виджета для главной страницы.
+
+У заблокированного IP есть действие «В белый список»: выбирается срок (1, 7, 30 дней или навсегда — `bot-guard.allow_durations`) и причина. Подсеть перестаёт блокироваться и проверяться фильтром сканеров, блокировка завершается, а в записи белого списка сохраняются ссылка на неё и её снимок — видно, откуда взялось разрешение.
 
 **Журнал ошибок:**
 - по умолчанию показывает только неисправленные ошибки, по одной строке на группу повторов;
@@ -36,7 +38,7 @@ use DurexKz\FilamentSecurity\SecurityPlugin;
 ->plugins([
     SecurityPlugin::make()
         ->navigationGroup(NavigationGroup::System) // строка или enum
-        ->navigationSort(110),                      // «Заблокированные IP» встают следующим пунктом
+        ->navigationSort(110),                      // «Заблокированные IP» и «Белый список IP» встают следующими пунктами
 ])
 ```
 
@@ -46,7 +48,7 @@ use DurexKz\FilamentSecurity\SecurityPlugin;
 
 | Метод | Назначение |
 |---|---|
-| `errorLogs(false)` / `bannedIps(false)` | отключить раздел |
+| `errorLogs(false)` / `bannedIps(false)` / `allowedIps(false)` | отключить раздел |
 | `widgets(false)` | не регистрировать виджеты |
 | `widgetsLayout(errorLogs: 4, bannedIps: 2, sort: 1)` | ширина и порядок виджетов на главной |
 | `pollingInterval('30s')` | частота обновления виджетов (`null` — без обновления) |

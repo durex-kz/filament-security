@@ -3,6 +3,7 @@
 namespace DurexKz\FilamentSecurity;
 
 use Closure;
+use DurexKz\FilamentSecurity\Resources\AllowedIps\AllowedIpResource;
 use DurexKz\FilamentSecurity\Resources\BannedIps\BannedIpResource;
 use DurexKz\FilamentSecurity\Resources\ErrorLogs\ErrorLogResource;
 use DurexKz\FilamentSecurity\Widgets\BannedIpsWidget;
@@ -30,6 +31,8 @@ class SecurityPlugin implements Plugin
 	protected bool $hasErrorLogs = true;
 
 	protected bool $hasBannedIps = true;
+
+	protected bool $hasAllowedIps = true;
 
 	protected bool $hasWidgets = true;
 
@@ -83,6 +86,7 @@ class SecurityPlugin implements Plugin
 		$panel->resources(array_values(array_filter([
 			$this->hasErrorLogs ? ErrorLogResource::class : null,
 			$this->hasBannedIps ? BannedIpResource::class : null,
+			$this->hasAllowedIps ? AllowedIpResource::class : null,
 		])));
 
 		if ($this->hasWidgets) {
@@ -112,6 +116,16 @@ class SecurityPlugin implements Plugin
 	}
 
 	/**
+	 * Белый список IP (durex-kz/bot-guard AllowedIp) — пунктом меню после «Заблокированных IP»
+	 */
+	public function allowedIps(bool $condition = true): static
+	{
+		$this->hasAllowedIps = $condition;
+
+		return $this;
+	}
+
+	/**
 	 * Виджеты «Нерешённые ошибки» и «Заблокированные IP» на главной панели.
 	 * Если у панели свой Dashboard::getWidgets(), классы виджетов нужно добавить туда самому
 	 */
@@ -135,7 +149,7 @@ class SecurityPlugin implements Plugin
 	}
 
 	/**
-	 * Позиция «Журнала ошибок» в меню; «Заблокированные IP» — следующим пунктом
+	 * Позиция «Журнала ошибок» в меню; «Заблокированные IP» и «Белый список IP» — следующими пунктами
 	 */
 	public function navigationSort(?int $sort): static
 	{

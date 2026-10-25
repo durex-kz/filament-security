@@ -1,6 +1,9 @@
 <?php
 
+use DurexKz\BotGuard\Models\AllowedIp;
 use DurexKz\BotGuard\Models\BannedIp;
+use DurexKz\FilamentSecurity\Resources\AllowedIps\AllowedIpResource;
+use DurexKz\FilamentSecurity\Resources\AllowedIps\Pages\ManageAllowedIps;
 use DurexKz\ErrorMonitor\Models\ErrorLog;
 use DurexKz\FilamentSecurity\Resources\BannedIps\BannedIpResource;
 use DurexKz\FilamentSecurity\Resources\BannedIps\Pages\ManageBannedIps;
@@ -21,6 +24,8 @@ it('registers resources and widgets with project navigation settings', function 
 		->and(ErrorLogResource::getNavigationGroup())->toBe('Система')
 		->and(ErrorLogResource::getNavigationSort())->toBe(810)
 		->and(BannedIpResource::getNavigationSort())->toBe(811)
+		->and(AllowedIpResource::getNavigationSort())->toBe(812)
+		->and($panel->getResources())->toContain(AllowedIpResource::class)
 		->and(UnresolvedErrorLogsWidget::getSort())->toBe(1)
 		->and(BannedIpsWidget::getSort())->toBe(2);
 });
@@ -193,4 +198,49 @@ it('copies multiline fields as plain text', function () {
 
 	// так CopyAction превращает показанное значение в текст для буфера обмена
 	expect(html_entity_decode(strip_tags($html->toHtml()), ENT_QUOTES | ENT_HTML5))->toBe($trace);
+});
+
+
+it('moves a banned IP to the allow list for the chosen term, keeping a link to the ban', function () {
+	$this->actingAs($admin = $this->admin());
+	$ban = BannedIp::create(['ip' => '203.0.113.5', 'reason' => 'Фильтр сканеров: 3 запросов', 'is_auto' => true, 'banned_until' => now()->addDay()]);
+
+	Livewire::test(ManageBannedIps::class)
+		->assertTableActionVisible('allow', $ban)
+		->callAction(TestAction::make('allow')->table($ban), ['duration' => '30', 'reason' => 'Офис за общим IP'])
+		->assertHasNoActionErrors();
+
+	$allowed = AllowedIp::sole();
+
+	expect($allowed->banned_ip_id)->toBe($ban->id)
+		->and($allowed->banned_snapshot['reason'])->toBe('Фильтр сканеров: 3 запросов')
+		->and($allowed->network)->toBe('203.0.113.0/24')
+		->and($allowed->reason)->toBe('Офис за общим IP')
+		->and($allowed->created_by)->toBe($admin->id)
+		->and((int) round(now()->diffInDays($allowed->allowed_until)))->toBe(30)
+		->and($ban->fresh()->isActive())->toBeFalse()
+		->and(BannedIp::matchBan('203.0.113.77'))->toBeNull()
+		->and(AllowedIp::matchAllow('203.0.113.77'))->toBeTrue();
+
+	// запись видна в белом списке, карточка показывает блокировку, из которой перенесена
+	Livewire::test(ManageAllowedIps::class)
+		->assertCanSeeTableRecords([$allowed])
+		->mountAction(TestAction::make('view')->table($allowed))
+		->assertSee('Фильтр сканеров: 3 запросов');
+});
+
+it('adds an IP to the allow list manually forever and hides the list from non-admins', function () {
+	$this->actingAs($this->admin());
+
+	Livewire::test(ManageAllowedIps::class)
+		->callAction('create', ['ip' => '198.51.100.7', 'duration' => 'forever', 'reason' => 'Партнёр'])
+		->assertHasNoActionErrors();
+
+	$allowed = AllowedIp::sole();
+	expect($allowed->allowed_until)->toBeNull()
+		->and($allowed->banned_ip_id)->toBeNull();
+
+	$this->actingAs(User::create(['name' => 'User']))
+		->get(AllowedIpResource::getUrl())
+		->assertForbidden();
 });

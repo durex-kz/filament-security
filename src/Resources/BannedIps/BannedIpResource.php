@@ -3,6 +3,7 @@
 namespace DurexKz\FilamentSecurity\Resources\BannedIps;
 
 use DurexKz\BotGuard\BotGuard;
+use DurexKz\FilamentSecurity\Actions\AllowFromBanAction;
 use DurexKz\BotGuard\Models\BannedIp;
 use DurexKz\FilamentSecurity\Resources\BannedIps\Pages\ManageBannedIps;
 use DurexKz\FilamentSecurity\SecurityPlugin;
@@ -116,6 +117,17 @@ class BannedIpResource extends Resource
 					->boolean()
 					->label(__('Действует')),
 
+				// подсеть сейчас в белом списке — фильтр её не трогает, даже если блокировка ещё действует
+				IconColumn::make('allowed')
+					->state(fn(BannedIp $record): bool => BotGuard::allowedModel()::matchAllow($record->ip))
+					->boolean()
+					->trueIcon(Heroicon::OutlinedShieldCheck)
+					->falseIcon(Heroicon::OutlinedMinus)
+					->trueColor('success')
+					->falseColor('gray')
+					->toggleable()
+					->label(__('В белом списке')),
+
 				TextColumn::make('reason')
 					->searchable()
 					->wrap()
@@ -171,6 +183,7 @@ class BannedIpResource extends Resource
 					->label(__('Автоматически')),
 			])
 			->recordActions([
+				AllowFromBanAction::make(),
 				EditAction::make(),
 				DeleteAction::make()->label(__('Разблокировать')),
 			])
